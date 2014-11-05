@@ -1,0 +1,82 @@
+# grok patterns for ISC DHCPD
+#
+# example use:
+#
+#   if [type] == "dhcp" {
+#     grok {
+#       break_on_match => true
+#       keep_empty_captures => false
+#       match => [
+#         "message", "%{SYSLOGBASE} %{DHCP_TYPE}",
+#         "message", "%{SYSLOGBASE} %{DHCP_OTHER}",
+#         "message", "%{SYSLOGBASE}"
+#       ]
+#     }
+#  
+#     date {
+#       match => [ "timestamp", "MMM dd HH:mm:ss", "MMM  d HH:mm:ss", "ISO8601" ]
+#     }
+#  
+#     if [dhcp_pkt_type] {
+#       grok {
+#         break_on_match => false
+#         keep_empty_captures => false
+#         match => [
+#           "message", "%{DHCP_DORA}"
+#         ]
+#         add_field => {
+#           "logtype" => "dhcp"
+#         }
+#       }
+#     }
+#   
+#     if ![logtype] {
+#       mutate {
+#         add_field => {
+#           "logtype" => "dhcpother"
+#         }
+#       }
+#     }
+#   }
+
+
+DHCP_TYPES (?:DHCPDISCOVER|DHCPOFFER|DHCPREQUEST|DHCPACK|DHCPNAK|DHCPINFORM|DHCPDECLINE|BOOTREQUEST)
+DHCP_SERVERIP %{IP:server_ip}
+DHCP_CLIENTIP %{IP:client_ip}(?: \(%{DHCP_SERVERIP}\))?
+DHCP_CLIENTHOSTNAME (?:%{NOTSPACE}|Hostname Unsuitable for Printing)
+DHCP_CLIENT %{COMMONMAC:client_mac}(?: \(%{DHCP_CLIENTHOSTNAME:client_hostname}\))?
+DHCP_INTERFACECHAR [^\s:]+
+DHCP_INTERFACE via %{DHCP_INTERFACECHAR:interface}
+DHCP_REASON (?:: %{GREEDYDATA:dhcp_reason})?
+
+DHCP_CIR %{DHCP_CLIENT} %{DHCP_INTERFACE}%{DHCP_REASON}
+
+DHCP_DISCOVER DHCPDISCOVER from %{DHCP_CIR}
+DHCP_OFFER DHCPOFFER on %{DHCP_CLIENTIP} to %{DHCP_CIR}
+DHCP_REQUEST DHCPREQUEST for %{DHCP_CLIENTIP} from %{DHCP_CIR}
+DHCP_ACK1 on %{DHCP_CLIENTIP} to %{DHCP_CLIENT} %{DHCP_INTERFACE}
+DHCP_ACK2 to %{DHCP_CLIENTIP} \(%{DHCP_CLIENT}\) %{DHCP_INTERFACE}
+DHCP_ACK DHCPACK (?:%{DHCP_ACK1}|%{DHCP_ACK2})
+DHCP_NAK DHCPNAK %{DHCP_ACK1}
+DHCP_INFORM DHCPINFORM from %{DHCP_CLIENTIP} %{DHCP_INTERFACE}
+DHCP_DECLINE DHCPDECLINE of %{DHCP_CLIENTIP} from %{DHCP_CIR}
+DHCP_BOOTREQ BOOTREQUEST from %{DHCP_CIR}
+
+DHCP_DORA %{DHCP_DISCOVER}|%{DHCP_OFFER}|%{DHCP_REQUEST}|%{DHCP_ACK}|%{DHCP_NAK}|%{DHCP_INFORM}|%{DHCP_DECLINE}|%{DHCP_BOOTREQ}
+DHCP_TYPE %{DHCP_TYPES:dhcp_pkt_type}
+
+# ---- other log formats
+
+DHCP_WRITETYPES (?:leases|class decls)
+DHCP_NETWORK %{NOTSPACE:dhcp_network}
+
+DHCP_BINDUPDATE bind update on %{DHCP_CLIENTIP}(?: got ack)? from %{NOTSPACE:dhcp_failover_peer}
+DHCP_BALANCE balanc(?:ing|ed) pool %{NOTSPACE:pool_id} %{DHCP_NETWORK} +%{GREEDYDATA:pool_stats}
+DHCP_DUPLICATEUID uid lease %{DHCP_CLIENTIP} for client %{DHCP_CLIENT} is duplicate on %{DHCP_NETWORK}
+DHCP_ABANDON Abandoning IP address %{DHCP_CLIENTIP}%{DHCP_REASON}
+DHCP_ICMPECHO ICMP Echo reply while lease %{DHCP_CLIENTIP} valid
+DHCP_WROTE Wrote %{NONNEGINT:dhcp_write_count} %{DHCP_WRITETYPES:dhcp_write_type} to leases file.
+DHCP_DUPLICATE client %{DHCP_CLIENT} has duplicate leases on %{DHCP_NETWORK}
+
+DHCP_OTHER %{DHCP_BINDUPDATE}|%{DHCP_BALANCE}|%{DHCP_DUPLICATEUID}|%{DHCP_ABANDON}|%{DHCP_ICMPECHO}|%{DHCP_WROTE}|%{DHCP_DUPLICATE}
+

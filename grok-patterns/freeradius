@@ -1,0 +1,76 @@
+# grok patterns for FreeRADIUS /var/log/radiusd/radiusd.log
+#
+# example use:
+#
+#  if [type] == "freeradius" {
+#    grok {
+#      patterns_dir => "/etc/logstash/patterns/"
+#      match => [ "message", "%{FREERADIUS_LINE}" ]
+#    }
+#
+#    if [fr_logclass] == "Auth" {
+#      grok {
+#        patterns_dir => "/etc/logstash/patterns/"
+#        match => [ "fr_message", "%{FREERADIUS_AUTH}" ]
+#      }
+#    }
+#
+#    if [fr_logclass] == "Error" {
+#      grok {
+#        patterns_dir => "/etc/logstash/patterns/"
+#        break_on_match => false
+#        match => [ "fr_message", "%{FREERADIUS_ERROR_ID}",
+#                   "fr_message", "%{FREERADIUS_ERROR_CLIENT}",
+#                   "fr_message", "%{FREERADIUS_ERROR_PORT}",
+#                   "fr_message", "%{FREERADIUS_ERROR_REQUEST}",
+#                   "fr_message", "%{FREERADIUS_ERROR_MODULE}" ]
+#      }
+#    }
+#
+#    sanitize_mac {
+#      match => { "radius_cli" => "client_mac" }
+#      fixcase => "lower"
+#      separator => ":"
+#    }
+#
+#    date {
+#      match => [ "timestamp" , "EEE MMM dd HH:mm:ss YYYY",
+#                               "EEE MMM  d HH:mm:ss YYYY"]
+#    }
+#  }
+
+
+FREERADIUS_DATE %{DAY} %{MONTH}  ?%{MONTHDAY} %{TIME} %{YEAR}
+FREERADIUS_LOGTYPE Auth|Info|Error|Proxy
+FREERADIUS_CLIENT %{NOTSPACE:radius_client}
+FREERADIUS_PORT %{INT:radius_port}
+FREERADIUS_CLI %{NOTSPACE:radius_cli}
+FREERADIUS_VIA %{DATA:radius_via}
+FREERADIUS_FROM \(from client %{FREERADIUS_CLIENT} port %{FREERADIUS_PORT}(?: cli %{FREERADIUS_CLI})?(?: via %{FREERADIUS_VIA})?\)
+FREERADIUS_USERNAME %{DATA:username}
+FREERADIUS_REASON \(%{DATA:radius_reason}\)
+FREERADIUS_MODULE \brlm_[a-z]+\b
+
+# Auth log lines
+FREERADIUS_LOGINOK Login OK: \[%{FREERADIUS_USERNAME}\] %{FREERADIUS_FROM}
+FREERADIUS_LOGININCORRECT Login incorrect(?: %{FREERADIUS_REASON})?: \[%{FREERADIUS_USERNAME}\] %{FREERADIUS_FROM}
+FREERADIUS_INVALIDUSER Invalid user: \[%{FREERADIUS_USERNAME}\] %{FREERADIUS_FROM}
+FREERADIUS_AUTH (?:%{FREERADIUS_LOGINOK}|%{FREERADIUS_LOGININCORRECT}|%{FREERADIUS_INVALIDUSER})
+
+# Info log lines
+# (pull out lines beginning WARNING: ?)
+FREERADIUS_INFO %{GREEDYDATA:fr_message}
+
+# Error log lines
+FREERADIUS_ERROR_ID ID: %{INT:fr_packet_id}
+FREERADIUS_ERROR_CLIENT client %{FREERADIUS_CLIENT}
+FREERADIUS_ERROR_PORT port %{FREERADIUS_PORT}
+FREERADIUS_ERROR_REQUEST request %{INT:fr_request}
+FREERADIUS_ERROR_MODULE %{FREERADIUS_MODULE:fr_module}
+
+# Proxy log lines
+FREERADIUS_PROXY %{GREEDYDATA:fr_message}
+
+# Main match on whole log line:
+FREERADIUS_LINE %{FREERADIUS_DATE:timestamp} : %{FREERADIUS_LOGTYPE:fr_logclass}: +%{GREEDYDATA:fr_message}
+
