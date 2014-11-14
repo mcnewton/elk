@@ -1,0 +1,164 @@
+# logstash configuration to process Cisco Wireless LAN Controller SNMP traps
+#
+# Matthew Newton
+# November 2014
+# 
+# The Cisco WLCs are configured to trap to a server with snmptrapd running,
+# which has a configuration similar to the following.
+#
+#   authCommunity log wlctraps
+#   doNotLogTraps no
+#   doNotRetainNotificationLogs yes
+#   format2 %.4y-%.2m-%.2l %.2h:%.2j:%.2k %B [%b]: %v\n
+#   logOption s7
+#   outputOption Q
+#
+# syslog is configured to write these local7 facility logs to a file, which is
+# what is fed into the following configuration. Note it may be necesssary to
+# run snmptrapd with the -Ls7 command-line option, rather than to use the
+# logOption setting in the configuration file.
+#
+# Known issues:
+# - The SNMP index is the MAC address, which is written in ascii - any happening
+#   to contain an '=' won't split out correctly with 'kv'.
+
+
+input {
+  stdin {
+    type => snmp
+  }
+}
+
+
+filter {
+
+  if [type] == "snmp" {
+
+    grok {
+      match => [ "message", "%{SYSLOGBASE} (?<header>[^\t]+)\t%{GREEDYDATA:varbind}" ]
+    }
+
+    date {
+      match => [ "timestamp", "MMM dd HH:mm:ss", "MMM  d HH:mm:ss", "ISO8601" ]
+    }
+
+    if [varbind] {
+      kv {
+        field_split => "\t"
+        value_split => "="
+        trim => " \""
+        trimkey => " "
+        source => [ "varbind" ]
+        target => "vb"
+      }
+
+      ruby {
+        code => "event.remove('vb').each { |k,v| event[k.gsub(/^.*::([^\.]+)\..*$/, '\1')] = v }"
+        remove_field => "varbind"
+      }
+
+      grok {
+        match => [ "snmpTrapOID", "^%{DATA:snmp_mib}::%{DATA:snmp_oid}$" ]
+        remove_field => "snmpTrapOID"
+      }
+
+      alter {
+        coalesce => [ "client_mac", "%{bsnStationMacAddress}", "%{cldcClientMacAddress}" ]
+        remove_field => [ "bsnStationMacAddress", "cldcClientMacAddress" ]
+      }
+
+      if [cldcClientSSID] {
+        mutate {
+          add_field => { "ssid" => "%{cldcClientSSID}" }
+          remove_field => [ "cldcClientSSID" ]
+        }
+      }
+
+      # convert this IP from hex to dotted quad
+      if [cldcClientByIpAddress] {
+        ruby {
+          code => "event['cldcClientByIpAddress'] = event['cldcClientByIpAddress'].unpack('A2A2A2A2').map { |a| a.to_i(16) }.join('.')"
+        }
+      }
+
+      alter {
+        coalesce => [ "client_ip", "%{bsnUserIpAddress}", "%{cldcClientIPAddress}", "%{cldcClientByIpAddress}" ]
+        remove_field => [ "bsnUserIpAddress", "cldcClientIPAddress", "cldcClientByIpAddress" ]
+      }
+
+      alter {
+        coalesce => [ "username", "%{bsnStationUserName}", "%{cldcClientUsername}", "%{bsnAuthFailureUserName}" ]
+        remove_field => [ "bsnStationUserName", "cldcClientUsername", "bsnAuthFailureUserName" ]
+      }
+
+      alter {
+        coalesce => [ "session_id", "%{cldcClientSessionID}" ]
+        remove_field => [ "cldcClientSessionID" ]
+      }
+
+      alter {
+        coalesce => [ "ap_mac", "%{bsnStationAPMacAddr}", "%{cldcApMacAddress}", "%{bsnAPDot3MacAddress}", "%{cLApSysMacAddress}" ]
+        remove_field => [ "bsnStationAPMacAddr", "cldcApMacAddress", "bsnAPDot3MacAddress", "cLApSysMacAddress" ]
+      }
+
+      alter {
+        coalesce => [ "ap_name", "%{bsnAPName}", "%{cLApName}" ]
+        remove_field => [ "bsnAPName", "cLApName" ]
+      }
+
+      alter {
+        coalesce => [ "slot", "%{bsnStationAPIfSlotId}", "%{cLApDot11IfSlotId}", "%{bsnAPIfSlotId}" ]
+        remove_field => [ "bsnStationAPIfSlotId", "cLApDot11IfSlotId", "bsnAPIfSlotId" ]
+      }
+
+
+      # rogues
+
+      alter {
+        coalesce => [ "rogue.ap_mac", "%{cLApRogueApMacAddress}" ]
+        remove_field => [ "cLApRogueApMacAddress" ]
+      }
+
+      alter {
+        coalesce => [ "rogue.ssid", "%{cLApRogueApSsid}" ]
+        remove_field => [ "cLApRogueApSsid" ]
+      }
+
+      alter {
+        coalesce => [ "rogue.channel", "%{cLApRogueDetectedChannel}" ]
+        remove_field => [ "cLApRogueDetectedChannel" ]
+      }
+
+      # end rogues
+
+
+      sanitize_mac {
+        match => { "ap_mac" => "ap_mac"
+                   "client_mac" => "client_mac"
+                   "cLApRogueClassifiedApMacAddress" => "cLApRogueClassifiedApMacAddress" }
+        separator => ":"
+        fixcase => "lower"
+      }
+
+      if [username] {
+        grok {
+          match => ["username", "^(?<stripped_username>[^@]+)(?:@.*)?$"]
+        }
+      }
+
+    }
+
+  } # type == snmp
+
+}
+
+
+output {
+  if [type] == "snmp" {
+    file {
+      path => "/tmp/snmp.json"
+    }
+  }
+}
+
+
