@@ -76,12 +76,37 @@ class LogStash::Filters::SanitizeMac < LogStash::Filters::Base
     @match.keys.each do |field|
       next if event[field].nil?
 
-      # strip out all existing separators
-      mac = event[field].gsub(/[:.-]/, "")
+      # Work out what format the incoming MAC address is in. As well as
+      # well-formed addresses, this has to cope with things like missing
+      # leading-zeroes, and ensuring that something using mixed delimiters
+      # does not parse.
+
+      # looks colon-delimited?
+      if event[field] =~ /^(?:[0-9a-f]{1,2}:){5}[0-9a-f]{1,2}$/i
+        octets = event[field].split(":")
+        mac = octets.map { |o| (o.length == 1 ? "0" + o : o) }.join
+
+      # looks hyphen-delimited?
+      elsif event[field] =~ /^(?:[0-9a-f]{1,2}-){5}[0-9a-f]{1,2}$/i
+        octets = event[field].split("-")
+        mac = octets.map { |o| (o.length == 1 ? "0" + o : o) }.join
+
+      # looks cisco dot-delimited?
+      elsif event[field] =~ /^[0-9a-f]{1,4}\.[0-9a-f]{1,4}\.[0-9a-f]{1,4}$/i
+        words = event[field].split(".")
+        mac = words.map { |o| (o.length < 4 ? ("000" + o)[-4..-1] : o) }.join
+
+      # last try; could just be 12-digit hex?
+      elsif event[field] =~ /^[0-9a-f]{12}$/i
+        mac = event[field]
+
+      # give up, it doesn't look like a MAC address
+      else
+        next
+      end
 
       # verify what we're left with really does look like a mac address
       next unless mac.length == 12
-      next unless mac =~ /^[0-9a-f]{12}$/i
 
       # split up into octets (or 16 bits for cisco format)
       if separator == "."
@@ -103,3 +128,4 @@ class LogStash::Filters::SanitizeMac < LogStash::Filters::Base
     filter_matched(event)
   end # def filter
 end # class LogStash::Filters::SanitizeMac
+
