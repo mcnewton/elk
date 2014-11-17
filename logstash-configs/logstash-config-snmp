@@ -11,16 +11,12 @@
 #   doNotRetainNotificationLogs yes
 #   format2 %.4y-%.2m-%.2l %.2h:%.2j:%.2k %B [%b]: %v\n
 #   logOption s7
-#   outputOption Q
+#   outputOption Qb
 #
 # syslog is configured to write these local7 facility logs to a file, which is
 # what is fed into the following configuration. Note it may be necesssary to
 # run snmptrapd with the -Ls7 command-line option, rather than to use the
 # logOption setting in the configuration file.
-#
-# Known issues:
-# - The SNMP index is the MAC address, which is written in ascii - any happening
-#   to contain an '=' won't split out correctly with 'kv'.
 
 
 input {
