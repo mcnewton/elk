@@ -19,11 +19,11 @@
 # logOption setting in the configuration file.
 
 
-input {
-  stdin {
-    type => snmp
-  }
-}
+#input {
+#  stdin {
+#    type => snmp
+#  }
+#}
 
 
 filter {
@@ -31,7 +31,7 @@ filter {
   if [type] == "snmp" {
 
     grok {
-      match => [ "message", "%{SYSLOGBASE} (?<header>[^\t]+)\t%{GREEDYDATA:varbind}" ]
+      match => [ "message", "%{SYSLOGBASE} (?<header>[^\t]+)(?:\t%{GREEDYDATA:varbind})?" ]
     }
 
     date {
@@ -70,12 +70,23 @@ filter {
         }
       }
 
-      # convert this IP from hex to dotted quad
+
+      # Convert IP addresses from hex to dotted quad
+
       if [cldcClientByIpAddress] {
         ruby {
           code => "event['cldcClientByIpAddress'] = event['cldcClientByIpAddress'].unpack('A2A2A2A2').map { |a| a.to_i(16) }.join('.')"
         }
       }
+
+      if [claRadiusAddress] {
+        ruby {
+          code => "event['claRadiusAddress'] = event['claRadiusAddress'].unpack('A2A2A2A2').map { |a| a.to_i(16) }.join('.')"
+        }
+      }
+
+
+      # Coalesce field values from Airespace and Cisco MIBs
 
       alter {
         coalesce => [ "client_ip", "%{bsnUserIpAddress}", "%{cldcClientIPAddress}", "%{cldcClientByIpAddress}" ]
@@ -107,38 +118,56 @@ filter {
         remove_field => [ "bsnStationAPIfSlotId", "cLApDot11IfSlotId", "bsnAPIfSlotId" ]
       }
 
-
-      # rogues
-
       alter {
-        coalesce => [ "rogue.ap_mac", "%{cLApRogueApMacAddress}" ]
-        remove_field => [ "cLApRogueApMacAddress" ]
+        coalesce => [ "packets_down", "%{cldcClientRxDataPackets}" ]
+        remove_field => [ "cldcClientRxDataPackets" ]
       }
 
       alter {
-        coalesce => [ "rogue.ssid", "%{cLApRogueApSsid}" ]
-        remove_field => [ "cLApRogueApSsid" ]
+        coalesce => [ "packets_up", "%{cldcClientTxDataPackets}" ]
+        remove_field => [ "cldcClientTxDataPackets" ]
       }
 
       alter {
-        coalesce => [ "rogue.channel", "%{cLApRogueDetectedChannel}" ]
-        remove_field => [ "cLApRogueDetectedChannel" ]
+        coalesce => [ "octets_down", "%{cldcClientRxDataBytes}" ]
+        remove_field => [ "cldcClientRxDataBytes" ]
       }
 
-      # end rogues
+      alter {
+        coalesce => [ "octets_up", "%{cldcClientTxDataBytes}" ]
+        remove_field => [ "cldcClientTxDataBytes" ]
+      }
 
+
+      # Rogues
+
+      mutate {
+        rename => [ "cLApRogueApMacAddress",    "rogue_ap_mac",
+                    "cLApRogueApSsid",          "rogue_ssid",
+                    "cLApRogueDetectedChannel", "rogue_channel",
+                    "cLApRSSI",                 "rogue_rssi",
+                    "cLApSNR",                  "rogue_snr" ]
+      }
+
+
+      # fixup mac addresses
 
       sanitize_mac {
         match => { "ap_mac" => "ap_mac"
                    "client_mac" => "client_mac"
+                   "rogue_ap_mac" => "rogue_ap_mac"
                    "cLApRogueClassifiedApMacAddress" => "cLApRogueClassifiedApMacAddress" }
         separator => ":"
         fixcase => "lower"
       }
 
+
+      # get username clear of realm
+
       if [username] {
         grok {
           match => ["username", "^(?<stripped_username>[^@]+)(?:@.*)?$"]
+          tag_on_failure => []
         }
       }
 
@@ -149,12 +178,12 @@ filter {
 }
 
 
-output {
-  if [type] == "snmp" {
-    file {
-      path => "/tmp/snmp.json"
-    }
-  }
-}
+#output {
+#  if [type] == "snmp" {
+#    file {
+#      path => "/tmp/snmp.json"
+#    }
+#  }
+#}
 
 
