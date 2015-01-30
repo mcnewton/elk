@@ -1,0 +1,108 @@
+#! /usr/bin/perl
+
+use LWP::UserAgent;
+use HTTP::Request::Common qw(GET);
+use JSON;
+use strict;
+
+my ($host, $index, $query, $period, $type) = @ARGV;
+
+$period = 900 unless defined $period;
+
+unless (defined $query) {
+  print "Error: $0 <host:port> <index> <query> [<period>] [<type>]\n";
+  exit 3;
+}
+
+
+sub indexformat
+{
+  my $t = shift;
+
+  my ($S, $M, $H, $d, $m, $y) = localtime($t);
+  $y+=1900;
+  $m+=1;
+  my $df = sprintf("%0.4d.%0.2d.%0.2d", $y, $m, $d);
+
+  return $df;
+}
+
+sub get_url
+{
+  my $checkperiod = shift;
+  my $index = shift;
+  my $type = shift;
+  my $query = shift;
+
+  my $url = "";
+
+  my ($S, $M, $H, $d, $m, $y) = localtime;
+  $y+=1900;
+  $m+=1;
+
+  my $mod = $M + ($H * 60); # minute of day
+
+  if ($mod < $checkperiod) {
+    $url .= "$index-" . indexformat(time - 60*60*24) . ",";
+  }
+
+  $url .= "$index-" . indexformat(time);
+
+  $url .= "/$type" if $type;
+
+  $url .= '/_search?size=1';         # get one record
+  $url .= '&q=' . $query;            # for the specified query
+  $url .= '&sort=@timestamp:desc';   # ordered by timestamp
+  $url .= '&fields=timestamp';       # and retrieve the human timestamp
+
+  return $url;
+}
+
+
+my $url = "$host/" . get_url($period, $index, $type, $query);
+$type = "*" unless defined $type;
+
+my $ua = LWP::UserAgent->new;
+$ua->ssl_opts(verify_hostname => 0 ,SSL_verify_mode => 0x00);
+$ua->agent("check-es-logs");
+my $req = GET $url;
+my $res = $ua->request($req);
+
+unless ($res->is_success) {
+  print "$index-$type-$query LWP unsuccessful\n";
+  print $url . "\n";
+  exit 3;
+}
+
+my $result = $res->content;
+
+unless ($result) {
+  print "$index-$type-$query empty result\n";
+  print $url . "\n";
+  exit 3;
+}
+
+my $json = decode_json $result;
+my $records = $$json{hits}{hits};
+
+my $timestamp;
+my $tstext;
+
+foreach my $r (@$records) {
+  $timestamp = $$r{sort}[0] / 1000;
+  $tstext = $$r{fields}{timestamp}[0];
+}
+
+if ($timestamp < (time - ($period * 3))) {
+  print "$index-$type-$query out of date: $tstext\n";
+  exit 2;
+}
+
+if ($timestamp < (time - $period)) {
+  print "$index-$type-$query out of date: $tstext\n";
+  exit 1;
+}
+
+print "$index-$type-$query logs are recent: $tstext\n";
+exit 0;
+
