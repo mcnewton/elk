@@ -93,6 +93,9 @@ foreach my $r (@$records) {
   $tstext = $$r{fields}{timestamp}[0];
 }
 
+$timestamp = 0 unless defined $timestamp;
+$tstext = "" unless defined $tstext;
+
 if ($timestamp < (time - ($period * 3))) {
   print "$index-$type-$query out of date: $tstext\n";
   exit 2;
