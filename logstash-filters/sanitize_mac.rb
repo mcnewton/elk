@@ -18,7 +18,7 @@ require "logstash/namespace"
 #     # in lowercase colon-delimited format.
 #     filter {
 #       sanitize_mac {
-#         match => [ "client_mac" => "client_mac_sanitized" ]
+#         match => { "client_mac" => "client_mac_sanitized" }
 #         separator => ":"
 #         fixcase => "lower"
 #       } 
